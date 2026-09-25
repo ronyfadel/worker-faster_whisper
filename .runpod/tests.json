@@ -5,7 +5,7 @@
       "input": {
         "audio": "https://github.com/runpod-workers/sample-inputs/raw/main/audio/gettysburg.wav",
         "model": "large-v3",
-        "transcription": "plain text",
+        "transcription": "plain_text",
         "translate": false,
         "temperature": 0,
         "best_of": 5,
@@ -17,7 +17,7 @@
         "logprob_threshold": -1,
         "no_speech_threshold": 0.6
       },
-      "timeout": 10000
+      "timeout": 600000
     }
   ],
   "config": {
