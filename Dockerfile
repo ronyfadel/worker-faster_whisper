@@ -43,6 +43,10 @@ COPY builder/fetch_models.py /fetch_models.py
 RUN python /fetch_models.py && \
     rm /fetch_models.py
 
+# Models are baked into the image above; never contact the Hugging Face Hub at runtime
+# (skips the per-load revision lookup and prevents any surprise re-download).
+ENV HF_HUB_OFFLINE=1
+
 # Copy handler and other code
 COPY src .
 
