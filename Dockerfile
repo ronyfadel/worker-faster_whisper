@@ -1,4 +1,4 @@
-# faster-whisper turbo needs cudnnn >= 9
+# ctranslate2 >= 4.5 (pulled in by faster-whisper) needs cuDNN 9
 # see https://github.com/runpod-workers/worker-faster_whisper/pull/44
 FROM nvidia/cuda:12.3.2-cudnn9-runtime-ubuntu22.04
 

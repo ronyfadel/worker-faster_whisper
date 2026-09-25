@@ -10,16 +10,8 @@
 
 ## Models
 
-- tiny
-- base
-- small
-- medium
-- large-v1
 - large-v2
 - large-v3
-- distil-large-v2
-- distil-large-v3
-- turbo
 
 ## Input
 
@@ -27,7 +19,7 @@
 | ----------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `audio`                             | Path  | URL to Audio file                                                                                                                                                      |
 | `audio_base64`                      | str   | Base64-encoded audio file                                                                                                                                              |
-| `model`                             | str   | Choose a Whisper model. Choices: "tiny", "base", "small", "medium", "large-v1", "large-v2", "large-v3", "distil-large-v2", "distil-large-v3", "turbo". Default: "base" |
+| `model`                             | str   | Choose a Whisper model. Choices: "large-v2", "large-v3". Default: "large-v3"                                                                                           |
 | `transcription`                     | str   | Choose the format for the transcription. Choices: "plain_text", "formatted_text", "srt", "vtt". Default: "plain_text"                                                  |
 | `translate`                         | bool  | Translate the text to English when set to True. Default: False                                                                                                         |
 | `translation`                       | str   | Choose the format for the translation. Choices: "plain_text", "formatted_text", "srt", "vtt". Default: "plain_text"                                                    |
@@ -55,7 +47,7 @@ The following inputs can be used for testing the model:
 {
   "input": {
     "audio": "https://github.com/runpod-workers/sample-inputs/raw/main/audio/gettysburg.wav",
-    "model": "turbo"
+    "model": "large-v3"
   }
 }
 ```
@@ -82,7 +74,7 @@ producing an output like this:
   "transcription": "Hello and welcome!",
   "translation": null,
   "device": "cuda",
-  "model": "turbo",
+  "model": "large-v3",
   "translation_time": 0.3796223163604736
 }
 ```

@@ -18,14 +18,8 @@ from faster_whisper.utils import format_timestamp
 
 # Define available models (for validation)
 AVAILABLE_MODELS = {
-    "tiny",
-    "base",
-    "small",
-    "medium",
-    "large-v1",
     "large-v2",
     "large-v3",
-    "turbo",
 }
 
 
@@ -46,7 +40,7 @@ class Predictor:
     def predict(
         self,
         audio,
-        model_name="base",
+        model_name="large-v3",
         transcription="plain_text",
         translate=False,
         translation="plain_text",  # Added in a previous PR
