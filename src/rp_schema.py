@@ -104,4 +104,99 @@ INPUT_VALIDATIONS = {
         'required': False,
         'default': False
     },
+    'repetition_penalty': {
+        'type': float,
+        'required': False,
+        'default': 1.0
+    },
+    'no_repeat_ngram_size': {
+        'type': int,
+        'required': False,
+        'default': 0
+    },
+    'suppress_blank': {
+        'type': bool,
+        'required': False,
+        'default': True
+    },
+    'prefix': {
+        'type': str,
+        'required': False,
+        'default': None
+    },
+    'hotwords': {
+        'type': str,
+        'required': False,
+        'default': None
+    },
+    'prompt_reset_on_temperature': {
+        'type': float,
+        'required': False,
+        'default': 0.5
+    },
+    'hallucination_silence_threshold': {
+        'type': float,
+        'required': False,
+        'default': None
+    },
+    'vad_parameters': {
+        'type': dict,
+        'required': False,
+        'default': None
+    },
+    'without_timestamps': {
+        'type': bool,
+        'required': False,
+        'default': False
+    },
+    'max_initial_timestamp': {
+        'type': float,
+        'required': False,
+        'default': 1.0
+    },
+    'prepend_punctuations': {
+        'type': str,
+        'required': False,
+        'default': "\"'“¿([{-"
+    },
+    'append_punctuations': {
+        'type': str,
+        'required': False,
+        'default': "\"'.。,，!！?？:：”)]}、"
+    },
+    'multilingual': {
+        'type': bool,
+        'required': False,
+        'default': False
+    },
+    'language_detection_threshold': {
+        'type': float,
+        'required': False,
+        'default': 0.5
+    },
+    'language_detection_segments': {
+        'type': int,
+        'required': False,
+        'default': 1
+    },
+    'clip_timestamps': {
+        'type': list,
+        'required': False,
+        'default': None
+    },
+    'chunk_length': {
+        'type': int,
+        'required': False,
+        'default': None
+    },
+    'max_new_tokens': {
+        'type': int,
+        'required': False,
+        'default': None
+    },
+    'batch_size': {
+        'type': int,
+        'required': False,
+        'default': 0
+    },
 }

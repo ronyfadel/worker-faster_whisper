@@ -38,6 +38,25 @@
 | `no_speech_threshold`               | float | If the probability of the token is higher than this value, consider the segment as silence. Default: 0.6                                                               |
 | `enable_vad`                        | bool  | If True, use the voice activity detection (VAD) to filter out parts of the audio without speech. This step is using the Silero VAD model. Default: False               |
 | `word_timestamps`                   | bool  | If True, include word timestamps in the output. Default: False                                                                                                         |
+| `repetition_penalty` | float | Penalty applied to the score of previously generated tokens (>1 discourages repetition). Default: 1.0 |
+| `no_repeat_ngram_size` | int | Prevent repetitions of n-grams with this size (0 disables). Default: 0 |
+| `suppress_blank` | bool | Suppress blank outputs at the beginning of the sampling. Default: True |
+| `prefix` | str | Optional text to provide as a prefix for the first window. Default: None |
+| `hotwords` | str | Words or phrases to boost during decoding, e.g. names or jargon. Ignored when `prefix` is set. Default: None |
+| `prompt_reset_on_temperature` | float | Reset the prompt if a fallback temperature is above this value. Only used when `condition_on_previous_text` is True. Default: 0.5 |
+| `hallucination_silence_threshold` | float | When `word_timestamps` is True, skip silent periods longer than this many seconds when a possible hallucination is detected. Default: None |
+| `vad_parameters` | dict | Silero VAD options: `threshold`, `neg_threshold`, `min_speech_duration_ms`, `max_speech_duration_s`, `min_silence_duration_ms`, `speech_pad_ms`. Default: None |
+| `without_timestamps` | bool | Only sample text tokens, no timestamp tokens. Default: False |
+| `max_initial_timestamp` | float | The initial timestamp cannot be later than this many seconds. Default: 1.0 |
+| `prepend_punctuations` | str | When `word_timestamps` is True, merge these punctuation symbols with the next word. Default: "'“¿([{- |
+| `append_punctuations` | str | When `word_timestamps` is True, merge these punctuation symbols with the previous word. Default: "'.。,，!！?？:：”)]}、 |
+| `multilingual` | bool | Perform language detection on every segment, for code-switched audio. Default: False |
+| `language_detection_threshold` | float | Stop language detection once a language's probability exceeds this value. Default: 0.5 |
+| `language_detection_segments` | int | Number of 30-second segments to consider for language detection. Default: 1 |
+| `clip_timestamps` | list | Flat list of `[start, end, start, end, ...]` seconds to transcribe; a trailing start runs to the end of the file. Default: whole file |
+| `chunk_length` | int | Length of audio window in seconds. Default: model's window (30) |
+| `max_new_tokens` | int | Maximum number of new tokens to generate per chunk. Default: None |
+| `batch_size` | int | When > 0, use faster-whisper's `BatchedInferencePipeline` and decode up to this many VAD-split chunks in parallel. Needs `enable_vad` or `clip_timestamps` for audio over 30 seconds; `condition_on_previous_text` is ignored. Default: 0 (sequential) |
 
 ### Example
 

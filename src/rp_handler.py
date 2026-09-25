@@ -69,27 +69,17 @@ def run_whisper_job(job):
         audio_input = base64_to_tempfile(job_input['audio_base64'])
 
     with rp_debugger.LineTimer('prediction_step'):
+        # Every validated input other than the audio sources and the model name
+        # maps 1:1 onto a Predictor.predict keyword argument.
+        predict_kwargs = {
+            key: value
+            for key, value in job_input.items()
+            if key not in ("audio", "audio_base64", "model")
+        }
         whisper_results = MODEL.predict(
             audio=audio_input,
             model_name=job_input["model"],
-            transcription=job_input["transcription"],
-            translation=job_input["translation"],
-            translate=job_input["translate"],
-            language=job_input["language"],
-            temperature=job_input["temperature"],
-            best_of=job_input["best_of"],
-            beam_size=job_input["beam_size"],
-            patience=job_input["patience"],
-            length_penalty=job_input["length_penalty"],
-            suppress_tokens=job_input.get("suppress_tokens", "-1"),
-            initial_prompt=job_input["initial_prompt"],
-            condition_on_previous_text=job_input["condition_on_previous_text"],
-            temperature_increment_on_fallback=job_input["temperature_increment_on_fallback"],
-            compression_ratio_threshold=job_input["compression_ratio_threshold"],
-            logprob_threshold=job_input["logprob_threshold"],
-            no_speech_threshold=job_input["no_speech_threshold"],
-            enable_vad=job_input["enable_vad"],
-            word_timestamps=job_input["word_timestamps"]
+            **predict_kwargs,
         )
 
     with rp_debugger.LineTimer('cleanup_step'):
