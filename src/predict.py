@@ -4,13 +4,15 @@ Whisper model. It is based on the Predictor class from the original Whisper
 repository, with some modifications to make it work with the RP platform.
 """
 
+import bisect
 import gc
+import os
 import threading
 import numpy as np
 
 from runpod.serverless.utils import rp_cuda
 
-from faster_whisper import BatchedInferencePipeline, WhisperModel
+from faster_whisper import BatchedInferencePipeline, WhisperModel, decode_audio
 from faster_whisper.utils import format_timestamp
 
 # Define available models (for validation)
@@ -18,6 +20,13 @@ AVAILABLE_MODELS = {
     "large-v2",
     "large-v3",
 }
+
+# pyannote speaker diarization pipeline. builder/fetch_models.py bakes it into
+# the image when a Hugging Face token is supplied at build time.
+DIARIZATION_MODEL = os.environ.get(
+    "DIARIZATION_MODEL", "pyannote/speaker-diarization-community-1"
+)
+SAMPLE_RATE = 16000
 
 
 class Predictor:
@@ -29,6 +38,8 @@ class Predictor:
         self.model_lock = (
             threading.Lock()
         )  # Lock for thread-safe model loading/unloading
+        self.diarization_pipeline = None
+        self.diarization_lock = threading.Lock()
 
     def setup(self):
         """No models are pre-loaded. Setup is minimal."""
@@ -75,6 +86,10 @@ class Predictor:
         chunk_length=None,
         max_new_tokens=None,
         batch_size=0,
+        diarize=False,
+        num_speakers=None,
+        min_speakers=None,
+        max_speakers=None,
     ):
         """
         Run a single prediction on the model, loading/unloading models as needed.
@@ -151,7 +166,8 @@ class Predictor:
             "suppress_tokens": parse_suppress_tokens(suppress_tokens),
             "without_timestamps": without_timestamps,
             "max_initial_timestamp": max_initial_timestamp,
-            "word_timestamps": word_timestamps,
+            # Speakers are assigned per word, so diarization needs word timings.
+            "word_timestamps": word_timestamps or diarize,
             "prepend_punctuations": prepend_punctuations,
             "append_punctuations": append_punctuations,
             "multilingual": multilingual,
@@ -180,26 +196,42 @@ class Predictor:
                 clip_timestamps if clip_timestamps else "0"
             )
 
+        audio_input = str(audio)
+        turns = None
+        if diarize:
+            # Decode once and share the waveform between Whisper and pyannote.
+            audio_input = decode_audio(audio_input, sampling_rate=SAMPLE_RATE)
+            turns = self.diarize(
+                audio_input,
+                num_speakers=num_speakers,
+                min_speakers=min_speakers,
+                max_speakers=max_speakers,
+            )
+
         segments, info = runner.transcribe(
-            str(audio), task="transcribe", **transcribe_kwargs
+            audio_input, task="transcribe", **transcribe_kwargs
         )
         segments = list(segments)
+        speakers = assign_speakers(segments, turns) if diarize else None
 
         # Format transcription
-        transcription_output = format_segments(transcription, segments)
+        transcription_output = format_segments(transcription, segments, speakers)
 
         # Handle translation if requested, reusing the transcription settings
         translation_output = None
         if translate:
             translation_segments, _ = runner.transcribe(
-                str(audio), task="translate", **transcribe_kwargs
+                audio_input, task="translate", **transcribe_kwargs
             )
+            translation_segments = list(translation_segments)
             translation_output = format_segments(
-                translation, list(translation_segments)
+                translation,
+                translation_segments,
+                assign_speakers(translation_segments, turns) if diarize else None,
             )
 
         results = {
-            "segments": serialize_segments(segments),
+            "segments": serialize_segments(segments, speakers),
             "detected_language": info.language,
             "transcription": transcription_output,
             "translation": translation_output,
@@ -209,18 +241,97 @@ class Predictor:
 
         if word_timestamps:
             word_timestamps_list = []
-            for segment in segments:
-                for word in segment.words or []:
-                    word_timestamps_list.append(
-                        {
-                            "word": word.word,
-                            "start": word.start,
-                            "end": word.end,
-                        }
-                    )
+            for i, segment in enumerate(segments):
+                for j, word in enumerate(segment.words or []):
+                    entry = {
+                        "word": word.word,
+                        "start": word.start,
+                        "end": word.end,
+                    }
+                    if speakers is not None:
+                        entry["speaker"] = speakers[i]["words"][j]
+                    word_timestamps_list.append(entry)
             results["word_timestamps"] = word_timestamps_list
 
+        if diarize:
+            results["speakers"] = sorted({speaker for _, _, speaker in turns})
+            results["diarization"] = [
+                {"start": start, "end": end, "speaker": speaker}
+                for start, end, speaker in turns
+            ]
+
         return results
+
+    def load_diarization_pipeline(self):
+        """
+        Lazily load the pyannote pipeline. torch and pyannote are imported
+        here so requests that don't diarize never pay for them.
+        """
+        with self.diarization_lock:
+            if self.diarization_pipeline is not None:
+                return self.diarization_pipeline
+
+            import torch
+            from pyannote.audio import Pipeline
+
+            print(f"Loading diarization pipeline: {DIARIZATION_MODEL}...")
+            try:
+                pipeline = Pipeline.from_pretrained(
+                    DIARIZATION_MODEL, token=os.environ.get("HF_TOKEN")
+                )
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to load diarization pipeline {DIARIZATION_MODEL}: {e}. "
+                    "Diarization is only available when the image was built with a "
+                    "Hugging Face token that has access to the model."
+                ) from e
+            if pipeline is None:
+                raise ValueError(
+                    f"Diarization pipeline {DIARIZATION_MODEL} is not available. "
+                    "Build the image with a Hugging Face token that has accepted "
+                    "the model's terms."
+                )
+            if rp_cuda.is_available():
+                pipeline.to(torch.device("cuda"))
+            self.diarization_pipeline = pipeline
+            print("Diarization pipeline loaded.")
+            return pipeline
+
+    def diarize(self, audio, num_speakers=None, min_speakers=None, max_speakers=None):
+        """
+        Run speaker diarization on a 16 kHz mono waveform and return a sorted
+        list of (start, end, speaker) turns.
+        """
+        import torch
+
+        pipeline = self.load_diarization_pipeline()
+        speaker_kwargs = {
+            key: value
+            for key, value in (
+                ("num_speakers", num_speakers),
+                ("min_speakers", min_speakers),
+                ("max_speakers", max_speakers),
+            )
+            if value is not None
+        }
+        output = pipeline(
+            {
+                "waveform": torch.from_numpy(audio).unsqueeze(0),
+                "sample_rate": SAMPLE_RATE,
+            },
+            **speaker_kwargs,
+        )
+        # pyannote 4 returns an object holding both the regular and the
+        # "exclusive" (one speaker at a time) annotations; the exclusive one
+        # lines up best with Whisper's single-speaker words. pyannote 3
+        # returns the annotation directly.
+        annotation = getattr(output, "exclusive_speaker_diarization", None)
+        if annotation is None:
+            annotation = getattr(output, "speaker_diarization", output)
+        return sorted(
+            (turn.start, turn.end, speaker)
+            for turn, _, speaker in annotation.itertracks(yield_label=True)
+        )
 
 
 def parse_suppress_tokens(value):
@@ -256,12 +367,86 @@ def to_clip_dicts(clip_timestamps):
     return clips
 
 
-def serialize_segments(transcript):
+class SpeakerTimeline:
+    """
+    Looks up which diarization speaker talks the most during a time span.
+    Turns are sorted by start; a running max of turn ends lets each lookup
+    stop scanning backwards as soon as no earlier turn can still overlap.
+    """
+
+    def __init__(self, turns):
+        self.turns = turns
+        self.starts = [start for start, _, _ in turns]
+        self.max_ends = []
+        running = float("-inf")
+        for _, end, _ in turns:
+            running = max(running, end)
+            self.max_ends.append(running)
+
+    def speaker_for(self, start, end):
+        """
+        Return the speaker overlapping [start, end] the most, or the nearest
+        speaker when nothing overlaps (e.g. a word in a short pause).
+        """
+        if not self.turns:
+            return None
+        idx = bisect.bisect_left(self.starts, end)
+        overlap = {}
+        j = idx - 1
+        while j >= 0 and self.max_ends[j] > start:
+            turn_start, turn_end, speaker = self.turns[j]
+            shared = min(end, turn_end) - max(start, turn_start)
+            if shared > 0:
+                overlap[speaker] = overlap.get(speaker, 0.0) + shared
+            j -= 1
+        if overlap:
+            return max(overlap, key=overlap.get)
+
+        nearest, best_gap = None, float("inf")
+        for k in (idx - 1, idx):
+            if 0 <= k < len(self.turns):
+                turn_start, turn_end, speaker = self.turns[k]
+                gap = max(turn_start - end, start - turn_end, 0.0)
+                if gap < best_gap:
+                    nearest, best_gap = speaker, gap
+        return nearest
+
+
+def assign_speakers(segments, turns):
+    """
+    Assign a speaker to every word and segment. Each word gets the speaker it
+    overlaps most; a segment gets the speaker holding most of its word time,
+    falling back to the segment's own span when it has no words.
+
+    Returns one {"speaker": str, "words": [str, ...]} entry per segment.
+    """
+    timeline = SpeakerTimeline(turns)
+    assigned = []
+    for segment in segments:
+        word_speakers = []
+        talk_time = {}
+        for word in segment.words or []:
+            speaker = timeline.speaker_for(word.start, word.end)
+            word_speakers.append(speaker)
+            if speaker is not None:
+                talk_time[speaker] = talk_time.get(speaker, 0.0) + max(
+                    word.end - word.start, 1e-3
+                )
+        if talk_time:
+            segment_speaker = max(talk_time, key=talk_time.get)
+        else:
+            segment_speaker = timeline.speaker_for(segment.start, segment.end)
+        assigned.append({"speaker": segment_speaker, "words": word_speakers})
+    return assigned
+
+
+def serialize_segments(transcript, speakers=None):
     """
     Serialize the segments to be returned in the API response.
     """
-    return [
-        {
+    serialized = []
+    for i, segment in enumerate(transcript):
+        entry = {
             "id": segment.id,
             "seek": segment.seek,
             "start": segment.start,
@@ -273,53 +458,78 @@ def serialize_segments(transcript):
             "compression_ratio": segment.compression_ratio,
             "no_speech_prob": segment.no_speech_prob,
         }
-        for segment in transcript
-    ]
+        if speakers is not None:
+            entry["speaker"] = speakers[i]["speaker"]
+        serialized.append(entry)
+    return serialized
 
 
-def format_segments(format_type, segments):
+def segment_speaker(speakers, i):
+    """Speaker label for segment i, or None without diarization."""
+    if speakers is None:
+        return None
+    return speakers[i]["speaker"]
+
+
+def format_segments(format_type, segments, speakers=None):
     """
-    Format the segments to the desired format
+    Format the segments to the desired format. With diarization,
+    formatted_text prefixes each line with its speaker, SRT prefixes each cue
+    with the speaker in brackets, and VTT uses <v> voice tags. plain_text
+    stays unlabeled.
     """
 
     if format_type == "plain_text":
         return " ".join([segment.text.lstrip() for segment in segments])
     elif format_type == "formatted_text":
-        return "\n".join([segment.text.lstrip() for segment in segments])
+        lines = []
+        for i, segment in enumerate(segments):
+            text = segment.text.lstrip()
+            speaker = segment_speaker(speakers, i)
+            lines.append(f"{speaker}: {text}" if speaker else text)
+        return "\n".join(lines)
     elif format_type == "srt":
-        return write_srt(segments)
+        return write_srt(segments, speakers)
     elif format_type == "vtt":
-        return write_vtt(segments)
+        return write_vtt(segments, speakers)
     else:  # Default or unknown format
         print(f"Warning: Unknown format '{format_type}', defaulting to plain text.")
         return " ".join([segment.text.lstrip() for segment in segments])
 
 
-def write_vtt(transcript):
+def write_vtt(transcript, speakers=None):
     """
     Write the transcript in VTT format.
     """
     result = ""
 
-    for segment in transcript:
+    for i, segment in enumerate(transcript):
+        text = segment.text.strip().replace('-->', '->')
+        speaker = segment_speaker(speakers, i)
+        if speaker:
+            text = f"<v {speaker}>{text}"
         result += f"{format_timestamp(segment.start, always_include_hours=True)} --> {format_timestamp(segment.end, always_include_hours=True)}\n"
-        result += f"{segment.text.strip().replace('-->', '->')}\n"
+        result += f"{text}\n"
         result += "\n"
 
     return result
 
 
-def write_srt(transcript):
+def write_srt(transcript, speakers=None):
     """
     Write the transcript in SRT format.
     """
     result = ""
 
     for i, segment in enumerate(transcript, start=1):
+        text = segment.text.strip().replace('-->', '->')
+        speaker = segment_speaker(speakers, i - 1)
+        if speaker:
+            text = f"[{speaker}] {text}"
         result += f"{i}\n"
         result += f"{format_timestamp(segment.start, always_include_hours=True, decimal_marker=',')} --> "
         result += f"{format_timestamp(segment.end, always_include_hours=True, decimal_marker=',')}\n"
-        result += f"{segment.text.strip().replace('-->', '->')}\n"
+        result += f"{text}\n"
         result += "\n"
 
     return result

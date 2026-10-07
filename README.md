@@ -57,6 +57,10 @@
 | `chunk_length` | int | Length of audio window in seconds. Default: model's window (30) |
 | `max_new_tokens` | int | Maximum number of new tokens to generate per chunk. Default: None |
 | `batch_size` | int | When > 0, use faster-whisper's `BatchedInferencePipeline` and decode up to this many VAD-split chunks in parallel. Needs `enable_vad` or `clip_timestamps` for audio over 30 seconds; `condition_on_previous_text` is ignored. Default: 0 (sequential) |
+| `diarize` | bool | Label who is speaking using the pyannote `speaker-diarization-community-1` pipeline. Adds a `speaker` to every segment and word, plus `speakers` and `diarization` to the output. Turns on word-level timing internally. Default: False |
+| `num_speakers` | int | Exact number of speakers, when known. Only used with `diarize`. Default: None (detect) |
+| `min_speakers` | int | Lower bound on the number of speakers. Only used with `diarize`. Default: None |
+| `max_speakers` | int | Upper bound on the number of speakers. Only used with `diarize`. Default: None |
 
 ### Example
 
@@ -97,3 +101,20 @@ producing an output like this:
   "translation_time": 0.3796223163604736
 }
 ```
+
+## Speaker diarization
+
+Set `diarize` to `true` to label speakers. Each word is assigned the speaker it overlaps most in pyannote's output, and each segment takes the speaker who holds most of its words.
+
+- `segments[].speaker` and, with `word_timestamps`, `word_timestamps[].speaker` carry labels such as `SPEAKER_00`.
+- `speakers` lists the distinct labels and `diarization` lists the raw `{start, end, speaker}` turns.
+- `formatted_text` prefixes each line with `SPEAKER_00:`, SRT prefixes cues with `[SPEAKER_00]`, and VTT uses `<v SPEAKER_00>` voice tags. `plain_text` stays unlabeled.
+- Diarization runs on PyTorch and is slow on CPU. Use a GPU worker.
+
+The pipeline is gated on Hugging Face. Accept its terms at https://huggingface.co/pyannote/speaker-diarization-community-1, then pass a token as a build secret so the model is baked into the image:
+
+```bash
+HF_TOKEN=hf_... docker build --secret id=hf_token,env=HF_TOKEN -t worker-faster-whisper .
+```
+
+The GitHub workflows read it from the `HF_TOKEN` repository secret. An image built without the token still works, but requests with `diarize` return an error.

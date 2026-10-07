@@ -38,9 +38,15 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install huggingface_hub[hf_xet] && \
     pip install -r /requirements.txt --no-cache-dir
 
-# Copy and run script to fetch models
+# Keep pyannote from sending usage telemetry.
+ENV PYANNOTE_METRICS_ENABLED=0
+
+# Copy and run script to fetch models. The pyannote diarization pipeline is
+# gated, so it is only baked in when a Hugging Face token is passed as a build
+# secret: docker build --secret id=hf_token,env=HF_TOKEN .
 COPY builder/fetch_models.py /fetch_models.py
-RUN python /fetch_models.py && \
+RUN --mount=type=secret,id=hf_token,required=false \
+    HF_TOKEN="$(cat /run/secrets/hf_token 2>/dev/null)" python /fetch_models.py && \
     rm /fetch_models.py
 
 # Models are baked into the image above; never contact the Hugging Face Hub at runtime

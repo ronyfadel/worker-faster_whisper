@@ -199,4 +199,24 @@ INPUT_VALIDATIONS = {
         'required': False,
         'default': 0
     },
+    'diarize': {
+        'type': bool,
+        'required': False,
+        'default': False
+    },
+    'num_speakers': {
+        'type': int,
+        'required': False,
+        'default': None
+    },
+    'min_speakers': {
+        'type': int,
+        'required': False,
+        'default': None
+    },
+    'max_speakers': {
+        'type': int,
+        'required': False,
+        'default': None
+    },
 }
