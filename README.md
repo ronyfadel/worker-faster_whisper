@@ -111,10 +111,4 @@ Set `diarize` to `true` to label speakers. Each word is assigned the speaker it 
 - `formatted_text` prefixes each line with `SPEAKER_00:`, SRT prefixes cues with `[SPEAKER_00]`, and VTT uses `<v SPEAKER_00>` voice tags. `plain_text` stays unlabeled.
 - Diarization runs on PyTorch and is slow on CPU. Use a GPU worker.
 
-The pipeline is gated on Hugging Face. Accept its terms at https://huggingface.co/pyannote/speaker-diarization-community-1, then pass a token as a build secret so the model is baked into the image:
-
-```bash
-HF_TOKEN=hf_... docker build --secret id=hf_token,env=HF_TOKEN -t worker-faster-whisper .
-```
-
-The GitHub workflows read it from the `HF_TOKEN` repository secret. An image built without the token still works, but requests with `diarize` return an error.
+The pipeline ships in this repo under `models/speaker-diarization-community-1`, so neither the build nor the worker contacts Hugging Face for it. It is [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) by pyannoteAI, redistributed under [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/). See `models/README.md` for how to update it.

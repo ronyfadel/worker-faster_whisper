@@ -21,10 +21,16 @@ AVAILABLE_MODELS = {
     "large-v3",
 }
 
-# pyannote speaker diarization pipeline. builder/fetch_models.py bakes it into
-# the image when a Hugging Face token is supplied at build time.
+# pyannote speaker diarization pipeline, vendored in the repo's models/ folder
+# (copied to /models in the image) so loading it never contacts Hugging Face.
+# Locally that is src/../models; in the image /predict.py's parent is /.
 DIARIZATION_MODEL = os.environ.get(
-    "DIARIZATION_MODEL", "pyannote/speaker-diarization-community-1"
+    "DIARIZATION_MODEL",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "models",
+        "speaker-diarization-community-1",
+    ),
 )
 SAMPLE_RATE = 16000
 
@@ -274,23 +280,14 @@ class Predictor:
             import torch
             from pyannote.audio import Pipeline
 
+            if not os.path.isfile(os.path.join(DIARIZATION_MODEL, "config.yaml")):
+                raise ValueError(
+                    f"Diarization model not found at {DIARIZATION_MODEL}. "
+                    "It ships in the repo's models/ folder; see the README."
+                )
+
             print(f"Loading diarization pipeline: {DIARIZATION_MODEL}...")
-            try:
-                pipeline = Pipeline.from_pretrained(
-                    DIARIZATION_MODEL, token=os.environ.get("HF_TOKEN")
-                )
-            except Exception as e:
-                raise ValueError(
-                    f"Failed to load diarization pipeline {DIARIZATION_MODEL}: {e}. "
-                    "Diarization is only available when the image was built with a "
-                    "Hugging Face token that has access to the model."
-                ) from e
-            if pipeline is None:
-                raise ValueError(
-                    f"Diarization pipeline {DIARIZATION_MODEL} is not available. "
-                    "Build the image with a Hugging Face token that has accepted "
-                    "the model's terms."
-                )
+            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL)
             if rp_cuda.is_available():
                 pipeline.to(torch.device("cuda"))
             self.diarization_pipeline = pipeline

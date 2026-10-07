@@ -24,6 +24,4 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           push: true
-          secrets: |
-            hf_token=${{ secrets.HF_TOKEN }}
           tags: ${{ secrets.DOCKERHUB_REPO }}/${{ secrets.DOCKERHUB_IMG }}:${{ github.event.release.tag_name }}
