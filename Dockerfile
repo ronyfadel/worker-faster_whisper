@@ -1,6 +1,7 @@
 # ctranslate2 >= 4.5 (pulled in by faster-whisper) needs cuDNN 9
 # see https://github.com/runpod-workers/worker-faster_whisper/pull/44
-FROM nvidia/cuda:12.3.2-cudnn9-runtime-ubuntu22.04
+# CUDA 12.8+ is required to run on Blackwell GPUs (RTX 5090, RTX PRO 4500/6000, B200).
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
 
 # Remove any third-party apt sources to avoid issues with expiring keys.
 RUN rm -f /etc/apt/sources.list.d/*.list

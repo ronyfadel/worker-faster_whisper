@@ -1,6 +1,8 @@
 runpod~=1.9.0
 
 faster-whisper==1.2.1
+# 4.7.0 is the first ctranslate2 release whose wheels are built with CUDA 12.8.
+ctranslate2>=4.7.0,<5
 
 # Speaker diarization. torch 2.10 is the last release whose PyPI wheels target
 # CUDA 12 (12.8, cuDNN 9) like ctranslate2; 2.11+ moved to CUDA 13 and would not
