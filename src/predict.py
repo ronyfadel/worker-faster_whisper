@@ -80,6 +80,9 @@ class Predictor:
         hallucination_silence_threshold=None,
         enable_vad=False,
         vad_parameters=None,
+        vad_fallback_min_kept_ratio=None,
+        vad_fallback_min_duration=0,
+        vad_fallback_parameters=None,
         word_timestamps=False,
         without_timestamps=False,
         max_initial_timestamp=1.0,
@@ -187,7 +190,21 @@ class Predictor:
             "language_detection_segments": language_detection_segments,
         }
 
+        # The fallback only means something when the filter actually runs, and
+        # faster-whisper skips the filter when clip_timestamps are given.
+        fallback_enabled = (
+            enable_vad
+            and not clip_timestamps
+            and vad_fallback_min_kept_ratio is not None
+        )
+
         if batch_size and batch_size > 0:
+            if fallback_enabled and vad_fallback_parameters is None:
+                # Batched inference can't run a long file with the filter off.
+                raise ValueError(
+                    "vad_fallback_parameters is required with batch_size: batched "
+                    "inference can't transcribe audio over 30 seconds with the filter off."
+                )
             # Batched inference decodes VAD-split chunks in parallel. It only
             # accepts clip_timestamps as a list of {"start", "end"} dicts and
             # always decodes without conditioning on previous text.
@@ -204,9 +221,11 @@ class Predictor:
 
         audio_input = str(audio)
         turns = None
-        if diarize:
-            # Decode once and share the waveform between Whisper and pyannote.
+        if diarize or fallback_enabled:
+            # Decode once: the waveform is shared with pyannote, and a fallback
+            # pass doesn't decode the file a second time.
             audio_input = decode_audio(audio_input, sampling_rate=SAMPLE_RATE)
+        if diarize:
             turns = self.diarize(
                 audio_input,
                 num_speakers=num_speakers,
@@ -214,9 +233,40 @@ class Predictor:
                 max_speakers=max_speakers,
             )
 
+        # transcribe() runs the filter before returning, but decoding only
+        # starts once the segments are read. So a pass whose filter kept too
+        # little can be dropped here without wasting any decoding.
         segments, info = runner.transcribe(
             audio_input, task="transcribe", **transcribe_kwargs
         )
+        vad_report = None
+        if enable_vad and not clip_timestamps:
+            vad_report = vad_summary(info)
+            print(
+                f"VAD kept {format_timestamp(info.duration_after_vad)} of "
+                f"{format_timestamp(info.duration)} ({vad_report['kept_ratio']:.0%})"
+            )
+        if fallback_enabled:
+            fall_back = should_fall_back(
+                info, vad_fallback_min_kept_ratio, vad_fallback_min_duration
+            )
+            vad_report["fallback_used"] = fall_back
+            if fall_back:
+                print(
+                    f"VAD kept under {vad_fallback_min_kept_ratio:.0%}; transcribing again "
+                    + (
+                        f"with VAD parameters {vad_fallback_parameters}"
+                        if vad_fallback_parameters is not None
+                        else "with the filter off"
+                    )
+                )
+                # The translation pass below reuses these settings too.
+                transcribe_kwargs["vad_filter"] = vad_fallback_parameters is not None
+                transcribe_kwargs["vad_parameters"] = vad_fallback_parameters
+                segments, info = runner.transcribe(
+                    audio_input, task="transcribe", **transcribe_kwargs
+                )
+                vad_report["fallback_kept_ratio"] = vad_summary(info)["kept_ratio"]
         segments = list(segments)
         speakers = assign_speakers(segments, turns) if diarize else None
 
@@ -244,6 +294,9 @@ class Predictor:
             "device": "cuda" if rp_cuda.is_available() else "cpu",
             "model": model_name,
         }
+
+        if vad_report is not None:
+            results["vad"] = vad_report
 
         if word_timestamps:
             word_timestamps_list = []
@@ -329,6 +382,28 @@ class Predictor:
             (turn.start, turn.end, speaker)
             for turn, _, speaker in annotation.itertracks(yield_label=True)
         )
+
+
+def vad_summary(info):
+    """How much audio the speech filter kept, in seconds and as a share of the file."""
+    duration = info.duration
+    kept = info.duration_after_vad
+    return {
+        "audio_duration": round(duration, 2),
+        "kept_duration": round(kept, 2),
+        "kept_ratio": round(kept / duration, 3) if duration > 0 else 1.0,
+    }
+
+
+def should_fall_back(info, min_kept_ratio, min_duration):
+    """
+    True when the filter kept less than min_kept_ratio of a file at least
+    min_duration seconds long. Distant or echoey speech can score below the
+    filter's threshold even though Whisper transcribes it fine.
+    """
+    if info.duration <= 0 or info.duration < (min_duration or 0):
+        return False
+    return info.duration_after_vad / info.duration < min_kept_ratio
 
 
 def parse_suppress_tokens(value):

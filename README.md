@@ -46,6 +46,9 @@
 | `prompt_reset_on_temperature` | float | Reset the prompt if a fallback temperature is above this value. Only used when `condition_on_previous_text` is True. Default: 0.5 |
 | `hallucination_silence_threshold` | float | When `word_timestamps` is True, skip silent periods longer than this many seconds when a possible hallucination is detected. Default: None |
 | `vad_parameters` | dict | Silero VAD options: `threshold`, `neg_threshold`, `min_speech_duration_ms`, `max_speech_duration_s`, `min_silence_duration_ms`, `speech_pad_ms`. Default: None |
+| `vad_fallback_min_kept_ratio` | float | With `enable_vad`, transcribe again with `vad_fallback_parameters` when the filter keeps less than this share of the audio (0–1). Catches distant or echoey speech the filter mistakes for silence. See [VAD fallback](#vad-fallback). Default: None (off) |
+| `vad_fallback_min_duration` | float | Files shorter than this many seconds never fall back. Default: 0 |
+| `vad_fallback_parameters` | dict | Filter options for the fallback pass, same keys as `vad_parameters`. None runs the fallback with the filter off; required with `batch_size`. Default: None |
 | `without_timestamps` | bool | Only sample text tokens, no timestamp tokens. Default: False |
 | `max_initial_timestamp` | float | The initial timestamp cannot be later than this many seconds. Default: 1.0 |
 | `prepend_punctuations` | str | When `word_timestamps` is True, merge these punctuation symbols with the next word. Default: "'“¿([{- |
@@ -101,6 +104,32 @@ producing an output like this:
   "translation_time": 0.3796223163604736
 }
 ```
+
+## VAD fallback
+
+The Silero speech filter (`enable_vad`) sometimes scores real speech below its threshold, e.g. a teacher recorded from across an echoey room, and drops most of the file before Whisper sees it. Set `vad_fallback_min_kept_ratio` to catch this:
+
+```json
+{
+  "enable_vad": true,
+  "vad_fallback_min_kept_ratio": 0.5,
+  "vad_fallback_min_duration": 600
+}
+```
+
+The worker checks how much audio the filter kept before any decoding starts, so a fallback costs one decoding pass, not two. Whenever the filter runs, the output has a `vad` block:
+
+```json
+"vad": {
+  "audio_duration": 3600.0,
+  "kept_duration": 900.0,
+  "kept_ratio": 0.25,
+  "fallback_used": true,
+  "fallback_kept_ratio": 1.0
+}
+```
+
+`fallback_used` only appears when `vad_fallback_min_kept_ratio` is set, and `fallback_kept_ratio` only when the fallback ran (1.0 with the filter off). The log gets one `VAD kept … of …` line per job and one more when the fallback runs.
 
 ## Speaker diarization
 

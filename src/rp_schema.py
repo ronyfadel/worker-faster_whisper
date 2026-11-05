@@ -144,6 +144,28 @@ INPUT_VALIDATIONS = {
         'required': False,
         'default': None
     },
+    # Fallback for audio the speech filter wrongly cuts (distant or echoey
+    # speech): when the filter keeps less than this share of the file,
+    # transcribe again with vad_fallback_parameters. None turns it off.
+    'vad_fallback_min_kept_ratio': {
+        'type': float,
+        'required': False,
+        'default': None,
+        'constraints': lambda value: value is None or 0 < value <= 1
+    },
+    # A None default, not 0.0: the validator skips constraints for values of
+    # the default's type, so a float default would let negatives through.
+    'vad_fallback_min_duration': {
+        'type': float,
+        'required': False,
+        'default': None,
+        'constraints': lambda value: value is None or value >= 0
+    },
+    'vad_fallback_parameters': {
+        'type': dict,
+        'required': False,
+        'default': None
+    },
     'without_timestamps': {
         'type': bool,
         'required': False,
