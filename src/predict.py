@@ -15,6 +15,12 @@ from runpod.serverless.utils import rp_cuda
 from faster_whisper import BatchedInferencePipeline, WhisperModel, decode_audio
 from faster_whisper.utils import format_timestamp
 
+import alignment_patch
+
+# Word alignment in faster-whisper 1.2.1 crashes on a segment it can't align
+# (a lone "🎵" on music) and fails the whole job; see alignment_patch.py.
+alignment_patch.apply()
+
 # Define available models (for validation)
 AVAILABLE_MODELS = {
     "large-v2",
