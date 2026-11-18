@@ -13,8 +13,9 @@ Whisper and ivrit workers). The method already skips segments it can't split int
 words; this copy also skips a segment with no alignment, so that segment gets no word
 timings and every other segment keeps its own.
 
-Only applied to the faster-whisper version it was copied from, so an upgrade can't
-silently swap in this old body.
+Only applied to the faster-whisper version it was copied from, and not when faster-whisper already
+has the fix (upstream #1460, on main after 1.2.1, whose version string still says 1.2.1), so an
+upgrade can't silently swap in this old body.
 """
 
 from typing import List
@@ -83,11 +84,27 @@ def find_alignment(
     return return_list
 
 
+def upstream_has_fix(method):
+    """True when faster-whisper's own find_alignment already skips empty alignments (#1460)."""
+    import inspect
+
+    try:
+        source = inspect.getsource(method)
+    except (OSError, TypeError):
+        return False
+    # upstream #1460 writes `if len(alignments) == 0:`, this module `if not alignments:`
+    return "len(alignments) == 0" in source or "if not alignments" in source
+
+
 def apply():
     """Install the fixed method on WhisperModel. Returns True when applied."""
     import faster_whisper
     from faster_whisper import WhisperModel
 
+    if upstream_has_fix(WhisperModel.find_alignment):
+        # Upstream main after 1.2.1 still reports version 1.2.1 but has the fix.
+        print("alignment_patch: faster-whisper already handles empty alignments; not patching")
+        return False
     if faster_whisper.__version__ != PATCHED_VERSION:
         print(
             f"alignment_patch: faster-whisper {faster_whisper.__version__} is not "

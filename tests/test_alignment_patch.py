@@ -60,6 +60,11 @@ class FindAlignmentTest(unittest.TestCase):
         ]
 
     def test_stock_method_crashes_on_a_segment_without_alignment(self):
+        if alignment_patch.upstream_has_fix(WhisperModel.find_alignment):
+            # upstream main: the stock method already returns no words for that segment
+            words = WhisperModel.find_alignment(fake_whisper(self.results), self.tokenizer, self.tokens, None, 100)
+            self.assertEqual(words[1], [])
+            return
         with self.assertRaises(IndexError) as raised:
             WhisperModel.find_alignment(
                 fake_whisper(self.results), self.tokenizer, self.tokens, None, 100
@@ -89,8 +94,18 @@ class FindAlignmentTest(unittest.TestCase):
             alignment_patch.find_alignment(fake_whisper([]), self.tokenizer, [], None, 100), []
         )
 
+    def test_upstream_fix_is_detected(self):
+        # our own copy has the guard; stock 1.2.1 doesn't
+        self.assertTrue(alignment_patch.upstream_has_fix(alignment_patch.find_alignment))
+        if not alignment_patch.upstream_has_fix(WhisperModel.find_alignment):
+            self.assertFalse(alignment_patch.upstream_has_fix(WhisperModel.find_alignment))
+
     def test_apply_installs_only_on_the_copied_version(self):
         original = WhisperModel.find_alignment
+        if alignment_patch.upstream_has_fix(original):
+            self.assertFalse(alignment_patch.apply())   # upstream main: nothing to patch
+            self.assertIs(WhisperModel.find_alignment, original)
+            return
         try:
             self.assertEqual(faster_whisper.__version__, alignment_patch.PATCHED_VERSION)
             self.assertTrue(alignment_patch.apply())

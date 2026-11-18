@@ -1,6 +1,10 @@
 runpod~=1.9.0
 
-faster-whisper==1.2.1
+# Upstream main after 1.2.1 (19 commits, unreleased as of Nov 18 2026): the empty-alignment fix
+# (#1460, music crash), linear collect_chunks (#1692, the speech filter's join was quadratic in file
+# length), Silero VAD v6.2 weights (#1390, phone calls and quiet speech). Its version string still
+# says 1.2.1. Move back to a release once 1.2.2 ships.
+faster-whisper @ https://github.com/SYSTRAN/faster-whisper/archive/6cb639e70786aea42b9233006ae60eaf07190bdb.tar.gz
 # 4.7.0 is the first ctranslate2 release whose wheels are built with CUDA 12.8.
 ctranslate2>=4.7.0,<5
 
