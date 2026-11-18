@@ -3,6 +3,9 @@ from faster_whisper.utils import download_model
 model_names = [
     "large-v2",
     "large-v3",
+    # empty_result_fallback_model; the image runs with HF_HUB_OFFLINE=1, so every model a job can
+    # ask for has to be downloaded here.
+    "large-v3-turbo",
 ]
 
 

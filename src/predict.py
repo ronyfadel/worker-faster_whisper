@@ -17,6 +17,7 @@ from faster_whisper.utils import format_timestamp
 
 import alignment_patch
 from prompt_echo import is_prompt_echo
+from empty_retry import should_retry_empty
 
 # Word alignment in faster-whisper 1.2.1 crashes on a segment it can't align
 # (a lone "🎵" on music) and fails the whole job; see alignment_patch.py.
@@ -26,6 +27,8 @@ alignment_patch.apply()
 AVAILABLE_MODELS = {
     "large-v2",
     "large-v3",
+    # For empty_result_fallback_model; faster-whisper's name for openai/whisper-large-v3-turbo.
+    "large-v3-turbo",
 }
 
 # pyannote speaker diarization pipeline, vendored in the repo's models/ folder
@@ -106,10 +109,33 @@ class Predictor:
         num_speakers=None,
         min_speakers=None,
         max_speakers=None,
+        empty_result_fallback_model=None,
+        empty_result_min_kept_ratio=0.5,
     ):
         """
         Run a single prediction on the model, loading/unloading models as needed.
         """
+        model = self.load_model(model_name)
+        if empty_result_fallback_model is not None and empty_result_fallback_model not in AVAILABLE_MODELS:
+            raise ValueError(
+                f"Invalid empty_result_fallback_model: {empty_result_fallback_model}. "
+                f"Available models are: {AVAILABLE_MODELS}"
+            )
+        return self._predict(
+            model, model_name, audio, transcription, translate, translation, language, temperature,
+            best_of, beam_size, patience, length_penalty, repetition_penalty, no_repeat_ngram_size,
+            suppress_tokens, suppress_blank, initial_prompt, prefix, hotwords, condition_on_previous_text,
+            prompt_reset_on_temperature, temperature_increment_on_fallback, compression_ratio_threshold,
+            logprob_threshold, no_speech_threshold, hallucination_silence_threshold, enable_vad,
+            vad_parameters, vad_fallback_min_kept_ratio, vad_fallback_min_duration, vad_fallback_parameters,
+            word_timestamps, without_timestamps, max_initial_timestamp, prepend_punctuations,
+            append_punctuations, multilingual, language_detection_threshold, language_detection_segments,
+            clip_timestamps, chunk_length, max_new_tokens, batch_size, diarize, num_speakers, min_speakers,
+            max_speakers, empty_result_fallback_model, empty_result_min_kept_ratio,
+        )
+
+    def load_model(self, model_name):
+        """The requested model, loaded on first use; only one model stays in GPU memory."""
         if model_name not in AVAILABLE_MODELS:
             raise ValueError(
                 f"Invalid model name: {model_name}. Available models are: {AVAILABLE_MODELS}"
@@ -153,7 +179,20 @@ class Predictor:
                 raise RuntimeError(
                     f"Model {model_name} could not be loaded or retrieved."
                 )
+        return model
 
+    def _predict(
+        self, model, model_name, audio, transcription, translate, translation, language, temperature,
+        best_of, beam_size, patience, length_penalty, repetition_penalty, no_repeat_ngram_size,
+        suppress_tokens, suppress_blank, initial_prompt, prefix, hotwords, condition_on_previous_text,
+        prompt_reset_on_temperature, temperature_increment_on_fallback, compression_ratio_threshold,
+        logprob_threshold, no_speech_threshold, hallucination_silence_threshold, enable_vad,
+        vad_parameters, vad_fallback_min_kept_ratio, vad_fallback_min_duration, vad_fallback_parameters,
+        word_timestamps, without_timestamps, max_initial_timestamp, prepend_punctuations,
+        append_punctuations, multilingual, language_detection_threshold, language_detection_segments,
+        clip_timestamps, chunk_length, max_new_tokens, batch_size, diarize, num_speakers, min_speakers,
+        max_speakers, empty_result_fallback_model, empty_result_min_kept_ratio,
+    ):
         if temperature_increment_on_fallback is not None:
             temperature = tuple(
                 np.arange(temperature, 1.0 + 1e-6, temperature_increment_on_fallback)
@@ -280,6 +319,24 @@ class Predictor:
             print(f"Dropped a transcript that only repeated the initial prompt: {segments[0].text.strip()!r}")
             vad_report["prompt_echo_removed"] = True
             segments = []
+        if should_retry_empty(segments, vad_report, model_name, empty_result_fallback_model,
+                              empty_result_min_kept_ratio):
+            # No words although the filter heard speech: one more pass with the fallback model.
+            print(f"{model_name} returned nothing on speech; transcribing again with {empty_result_fallback_model}")
+            fallback_model = self.load_model(empty_result_fallback_model)
+            fallback_runner = (
+                BatchedInferencePipeline(fallback_model) if batch_size and batch_size > 0 else fallback_model
+            )
+            retry_segments, retry_info = fallback_runner.transcribe(
+                audio_input, task="transcribe", **transcribe_kwargs
+            )
+            retry_segments = list(retry_segments)
+            vad_report["empty_result_fallback_model"] = empty_result_fallback_model
+            vad_report["empty_result_fallback_segments"] = len(retry_segments)
+            if retry_segments:
+                segments, info = retry_segments, retry_info
+                model_name = empty_result_fallback_model
+                runner = fallback_runner  # a translation pass uses the model that heard the speech
         speakers = assign_speakers(segments, turns) if diarize else None
 
         # Format transcription

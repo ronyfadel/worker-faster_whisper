@@ -166,6 +166,20 @@ INPUT_VALIDATIONS = {
         'required': False,
         'default': None
     },
+    # When the transcript comes back with no segments although the speech filter kept at least
+    # empty_result_min_kept_ratio of the file, transcribe again with this model (e.g.
+    # "large-v3-turbo") in the same job. None turns it off.
+    'empty_result_fallback_model': {
+        'type': str,
+        'required': False,
+        'default': None
+    },
+    'empty_result_min_kept_ratio': {
+        'type': float,
+        'required': False,
+        'default': None,
+        'constraints': lambda value: value is None or 0 < value <= 1
+    },
     'without_timestamps': {
         'type': bool,
         'required': False,
