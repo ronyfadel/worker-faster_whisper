@@ -16,6 +16,7 @@ from faster_whisper import BatchedInferencePipeline, WhisperModel, decode_audio
 from faster_whisper.utils import format_timestamp
 
 import alignment_patch
+from prompt_echo import is_prompt_echo
 
 # Word alignment in faster-whisper 1.2.1 crashes on a segment it can't align
 # (a lone "🎵" on music) and fails the whole job; see alignment_patch.py.
@@ -274,6 +275,11 @@ class Predictor:
                 )
                 vad_report["fallback_kept_ratio"] = vad_summary(info)["kept_ratio"]
         segments = list(segments)
+        if is_prompt_echo(segments, initial_prompt, vad_report):
+            # Nothing to transcribe: Whisper only repeated our own prompt back.
+            print(f"Dropped a transcript that only repeated the initial prompt: {segments[0].text.strip()!r}")
+            vad_report["prompt_echo_removed"] = True
+            segments = []
         speakers = assign_speakers(segments, turns) if diarize else None
 
         # Format transcription
