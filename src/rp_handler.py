@@ -6,13 +6,15 @@ rp_debugger:
 The handler must be called with --rp_debugger flag to enable it.
 """
 import base64
+import os
 import tempfile
 
 from rp_schema import INPUT_VALIDATIONS
-from runpod.serverless.utils import download_files_from_urls, rp_cleanup, rp_debugger
+from runpod.serverless.utils import rp_cleanup, rp_debugger
 from runpod.serverless.utils.rp_validator import validate
 import runpod
 import predict
+from audio_download import download_audio
 
 
 MODEL = predict.Predictor()
@@ -63,27 +65,35 @@ def run_whisper_job(job):
 
     if job_input.get('audio', False):
         with rp_debugger.LineTimer('download_step'):
-            audio_input = download_files_from_urls(job['id'], [job_input['audio']])[0]
+            # Raises AudioDownloadError ("Couldn't download the audio …") when it can't, so the
+            # job fails with a clear reason instead of "No such file or directory: 'None'".
+            audio_input = download_audio(job_input['audio'])
 
     if job_input.get('audio_base64', False):
         audio_input = base64_to_tempfile(job_input['audio_base64'])
 
-    with rp_debugger.LineTimer('prediction_step'):
-        # Every validated input other than the audio sources and the model name
-        # maps 1:1 onto a Predictor.predict keyword argument.
-        predict_kwargs = {
-            key: value
-            for key, value in job_input.items()
-            if key not in ("audio", "audio_base64", "model")
-        }
-        whisper_results = MODEL.predict(
-            audio=audio_input,
-            model_name=job_input["model"],
-            **predict_kwargs,
-        )
-
-    with rp_debugger.LineTimer('cleanup_step'):
-        rp_cleanup.clean(['input_objects'])
+    try:
+        with rp_debugger.LineTimer('prediction_step'):
+            # Every validated input other than the audio sources and the model name
+            # maps 1:1 onto a Predictor.predict keyword argument.
+            predict_kwargs = {
+                key: value
+                for key, value in job_input.items()
+                if key not in ("audio", "audio_base64", "model")
+            }
+            whisper_results = MODEL.predict(
+                audio=audio_input,
+                model_name=job_input["model"],
+                **predict_kwargs,
+            )
+    finally:
+        with rp_debugger.LineTimer('cleanup_step'):
+            rp_cleanup.clean(['input_objects'])
+            # The downloaded or decoded audio lives in a temp file; long recordings are 100 MB+.
+            try:
+                os.remove(audio_input)
+            except OSError:
+                pass
 
     return whisper_results
 
