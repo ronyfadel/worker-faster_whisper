@@ -13,8 +13,10 @@ from rp_schema import INPUT_VALIDATIONS
 from runpod.serverless.utils import rp_cleanup, rp_debugger
 from runpod.serverless.utils.rp_validator import validate
 import runpod
+from runpod.version import __version__ as runpod_version
 import predict
 from audio_download import download_audio
+from cuda_oom import is_cuda_out_of_memory, out_of_memory_result
 
 
 MODEL = predict.Predictor()
@@ -86,6 +88,11 @@ def run_whisper_job(job):
                 model_name=job_input["model"],
                 **predict_kwargs,
             )
+    except RuntimeError as error:  # torch.cuda.OutOfMemoryError is a RuntimeError too
+        if not is_cuda_out_of_memory(error):
+            raise
+        # memory left behind by earlier jobs: fail this one and have RunPod replace the worker
+        return out_of_memory_result(error, runpod_version)
     finally:
         with rp_debugger.LineTimer('cleanup_step'):
             rp_cleanup.clean(['input_objects'])
