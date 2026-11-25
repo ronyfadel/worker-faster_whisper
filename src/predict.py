@@ -16,6 +16,7 @@ from faster_whisper import BatchedInferencePipeline, WhisperModel, decode_audio
 from faster_whisper.utils import format_timestamp
 
 import alignment_patch
+import diarize_speed
 from prompt_echo import is_prompt_echo
 from empty_retry import should_retry_empty
 
@@ -109,6 +110,8 @@ class Predictor:
         num_speakers=None,
         min_speakers=None,
         max_speakers=None,
+        diarize_tf32=None,
+        diarize_shared_embeddings=None,
         empty_result_fallback_model=None,
         empty_result_min_kept_ratio=0.5,
     ):
@@ -131,7 +134,8 @@ class Predictor:
             word_timestamps, without_timestamps, max_initial_timestamp, prepend_punctuations,
             append_punctuations, multilingual, language_detection_threshold, language_detection_segments,
             clip_timestamps, chunk_length, max_new_tokens, batch_size, diarize, num_speakers, min_speakers,
-            max_speakers, empty_result_fallback_model, empty_result_min_kept_ratio,
+            max_speakers, diarize_tf32, diarize_shared_embeddings, empty_result_fallback_model,
+            empty_result_min_kept_ratio,
         )
 
     def load_model(self, model_name):
@@ -191,7 +195,8 @@ class Predictor:
         word_timestamps, without_timestamps, max_initial_timestamp, prepend_punctuations,
         append_punctuations, multilingual, language_detection_threshold, language_detection_segments,
         clip_timestamps, chunk_length, max_new_tokens, batch_size, diarize, num_speakers, min_speakers,
-        max_speakers, empty_result_fallback_model, empty_result_min_kept_ratio,
+        max_speakers, diarize_tf32, diarize_shared_embeddings, empty_result_fallback_model,
+        empty_result_min_kept_ratio,
     ):
         if temperature_increment_on_fallback is not None:
             temperature = tuple(
@@ -277,6 +282,10 @@ class Predictor:
                 num_speakers=num_speakers,
                 min_speakers=min_speakers,
                 max_speakers=max_speakers,
+                options=diarize_speed.diarize_options({
+                    "diarize_tf32": diarize_tf32,
+                    "diarize_shared_embeddings": diarize_shared_embeddings,
+                }),
             )
 
         # transcribe() runs the filter before returning, but decoding only
@@ -412,11 +421,12 @@ class Predictor:
             pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL)
             if rp_cuda.is_available():
                 pipeline.to(torch.device("cuda"))
+            diarize_speed.install()
             self.diarization_pipeline = pipeline
             print("Diarization pipeline loaded.")
             return pipeline
 
-    def diarize(self, audio, num_speakers=None, min_speakers=None, max_speakers=None):
+    def diarize(self, audio, num_speakers=None, min_speakers=None, max_speakers=None, options=None):
         """
         Run speaker diarization on a 16 kHz mono waveform and return a sorted
         list of (start, end, speaker) turns.
@@ -433,13 +443,15 @@ class Predictor:
             )
             if value is not None
         }
-        output = pipeline(
-            {
-                "waveform": torch.from_numpy(audio).unsqueeze(0),
-                "sample_rate": SAMPLE_RATE,
-            },
-            **speaker_kwargs,
-        )
+        # Per-request speed settings (diarize_speed.py); none means pyannote's defaults.
+        with diarize_speed.applied(pipeline, options or {}):
+            output = pipeline(
+                {
+                    "waveform": torch.from_numpy(audio).unsqueeze(0),
+                    "sample_rate": SAMPLE_RATE,
+                },
+                **speaker_kwargs,
+            )
         # pyannote 4 returns an object holding both the regular and the
         # "exclusive" (one speaker at a time) annotations; the exclusive one
         # lines up best with Whisper's single-speaker words. pyannote 3

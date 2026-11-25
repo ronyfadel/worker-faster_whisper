@@ -255,4 +255,15 @@ INPUT_VALIDATIONS = {
         'required': False,
         'default': None
     },
+    # Speaker-labelling speed settings (diarize_speed.py); unset keeps pyannote's defaults.
+    'diarize_tf32': {
+        'type': bool,
+        'required': False,
+        'default': None
+    },
+    'diarize_shared_embeddings': {
+        'type': bool,
+        'required': False,
+        'default': None
+    },
 }
